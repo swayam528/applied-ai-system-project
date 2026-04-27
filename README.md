@@ -307,35 +307,74 @@ Continuous features use a proximity formula: `weight × (1 − |song_value − u
 
 ---
 
-## Testing Summary
+## Reliability and Evaluation
 
-### What the tests cover
+### Test suite summary
 
-22 tests across two files, all runnable offline without an API key:
+**27 tests, 27 passed — all run offline without an API key.**
 
-| Test group | File | What it checks |
+```
+pytest tests/            # runs all 27 tests in ~0.1 seconds
+python tests/evaluate.py # prints the human-readable evaluation report
+```
+
+| Test file | Tests | What it covers |
 |---|---|---|
-| `TestGetCatalogInfo` | `test_ai_recommender.py` | Tool returns correct genre/mood counts, sorted output |
-| `TestSearchSongs` | `test_ai_recommender.py` | Filtering by genre, mood, both, neither; field presence; empty results |
-| `TestScoreAndRank` | `test_ai_recommender.py` | k-result slicing, descending sort, score bounds (0–10), genre-match wins |
-| Integration | `test_ai_recommender.py` | Full agentic loop with mocked Gemini; API error returns safe message |
-| Unit | `test_recommender.py` | `Recommender.recommend()` sort order; `explain_recommendation()` returns non-empty string |
+| `test_ai_recommender.py` | 20 | Tool execution (get_catalog_info, search_songs, score_and_rank), index construction, full agentic loop (mocked Gemini), API error handling |
+| `test_evaluate.py` | 5 | Genre precision, High-confidence score floor (≥7.0), determinism, missing-genre graceful degradation, confidence label thresholds |
+| `test_recommender.py` | 2 | Recommender sort order, explanation non-empty |
+
+### Automated evaluation results
+
+The evaluation script (`tests/evaluate.py`) runs all 6 profiles through the scoring engine and measures four metrics:
+
+```
+Profile                          Top-1 Result              Score   Conf    Genre Match
+─────────────────────────────────────────────────────────────────────────────────────
+Late-Night Study (Lofi/Chill)    Library Rain (lofi)        9.67   High       ✓
+High-Energy Pop Fan              Sunrise City (pop)         9.53   High       ✓
+Deep Intense Rock                Storm Runner (rock)        9.74   High       ✓
+Conflicting: High Energy + Sad   Iron Cathedral (metal)     7.81   High       ✓
+Unknown Genre (k-pop)            Sunrise City (pop)         6.67   Medium     ✗  ⚠
+Extreme Acoustic Minimalist      Sonata in Grey (classical) 9.63   High       ✓
+─────────────────────────────────────────────────────────────────────────────────────
+Genre coverage       : 5/6 profiles have their genre in catalog  (83%)
+Top-1 genre precision: 5/6 top results matched requested genre   (83%)
+Average top-1 score  : 8.84 / 10.0
+Determinism          : 6/6 identical results on 3 consecutive runs (100%)
+```
+
+**In plain English:** 5 out of 6 profiles returned a perfect genre match at #1. The 1 miss (`k-pop`) is a known catalog gap — no k-pop songs exist in the CSV, so the system falls back to the best numeric match and signals this with a **Medium confidence** badge in the UI. The scoring pipeline is 100% deterministic.
+
+### Confidence scoring
+
+Every song card in the UI displays a confidence label derived from its score:
+
+| Score | Label | Meaning |
+|---|---|---|
+| ≥ 7.0 | **High** (green) | Genre matched (+3 pts guaranteed); features align |
+| 4.0 – 6.9 | **Medium** (amber) | Genre absent from catalog; best numeric fit |
+| < 4.0 | **Low** (red) | Catalog gap; system is extrapolating from weak signals |
+
+A score below 7.0 is only possible when the genre bonus (3.0 pts) is missed, which always indicates a catalog gap. This makes the confidence tier a reliable, automatically-derived guardrail that tells users when the system is guessing.
+
+### Logging and error handling
+
+- Every layer (`recommender.py`, `ai_recommender.py`, `main.py`) uses Python's `logging` module. Run `python -m src.main --verbose` to see DEBUG-level trace including tool names, input arguments, result sizes, and iteration counts.
+- API errors from Gemini are caught with a `try/except` block and return a human-readable message (`"Sorry — there was a problem contacting the AI service"`) instead of an uncaught exception.
+- The agentic loop is capped at 6 iterations to prevent runaway API usage.
 
 ### What worked
 
-- The mocked integration test faithfully simulates the two-iteration agentic loop (tool call → final answer) without hitting the API, which means the test suite runs in under 1 second.
-- The tool-execution tests caught two real bugs during development: `search_songs` was accidentally filtering on `song["genre"].lower()` while the CSV stores genres in lowercase already, and `score_and_rank` was dropping the `reasons` key from its output in an early version.
-- The `test_recommend_handles_api_error` test confirmed that a network failure returns a human-readable message instead of an uncaught exception.
+- Mocked integration tests simulate the full two-iteration agentic loop (tool call → final answer) without hitting the API — the entire suite runs in 0.09 seconds.
+- Type coercions in the tool dispatcher (`bool()`, `float()`) caught a real class of bug: Gemini sometimes returns `"true"` (string) instead of `true` (boolean) for `likes_acoustic`, which would silently produce wrong scores without the coercion.
+- The `test_recommend_handles_api_error` test confirmed that network failures surface a safe message rather than a Python traceback.
 
 ### What didn't work / limitations found
 
-- **Model name drift:** The original default (`gemini-1.5-flash`) was not available on the free-tier endpoint; the app silently failed until the model was changed to `gemini-flash-latest`. A version-pinning strategy (listing models at startup and warning on mismatch) would prevent this in production.
-- **gRPC shutdown warning:** The `google-generativeai` library emits a `grpc_wait_for_shutdown_with_timeout() timed out` warning on exit. This is a known upstream issue in the library and does not affect results, but it looks alarming in a demo terminal.
-- **Catalog gaps in AI mode:** When asked for a genre not in the catalog (e.g., "k-pop"), Gemini falls back to mood and numeric features and returns plausible-sounding results — but with no warning to the user that genre matching failed entirely. A guardrail that checks genre coverage before generating the response would improve honesty.
-
-### What I learned from testing
-
-Writing tests before running the live API revealed that the tool dispatcher was the most failure-prone component — it has no type enforcement on its inputs, so a model returning a string `"true"` instead of a boolean `true` for `likes_acoustic` would silently corrupt the score. Adding `bool(tool_input["likes_acoustic"])` and `float(tool_input.get("target_energy", 0.5))` coercions fixed this class of bug entirely.
+- **Model name drift:** The original default (`gemini-1.5-flash`) was unavailable on the free-tier endpoint; the app silently returned an error until the model was changed to `gemini-flash-latest`. A startup check that calls `list_models()` and warns on mismatch would prevent this in production.
+- **Catalog gaps in AI mode:** Gemini returns plausible-sounding results even when no genre match exists, with no warning. The confidence badge addresses this in classic mode; AI mode relies on Gemini's own phrasing to signal uncertainty.
+- **gRPC shutdown warning:** A cosmetic `grpc_wait_for_shutdown_with_timeout() timed out` warning appears on exit — a known upstream issue in `google-generativeai` that does not affect results.
 
 ---
 

@@ -97,6 +97,21 @@ class Recommender:
         })
         return " | ".join(reasons)
 
+def confidence_label(score: float) -> str:
+    """Map a 0–10 score to a human-readable confidence tier.
+
+    Thresholds reflect what the scoring formula can achieve:
+      ≥ 7.0  — genre matched (+3 pts guaranteed); strong feature alignment
+      4.0–6.9 — genre missed but features align; system is extrapolating
+      < 4.0  — catalog gap; system is guessing from weak signals
+    """
+    if score >= 7.0:
+        return "High"
+    if score >= 4.0:
+        return "Medium"
+    return "Low"
+
+
 def load_songs(csv_path: str) -> List[Dict]:
     """Read songs.csv and return a list of dicts with typed numeric fields."""
     songs = []

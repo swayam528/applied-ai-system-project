@@ -17,7 +17,7 @@ except ImportError:
     pass
 
 import streamlit as st
-from recommender import load_songs, recommend_songs
+from recommender import load_songs, recommend_songs, confidence_label
 
 # ---------------------------------------------------------------------------
 # Config
@@ -209,8 +209,19 @@ def get_ai_recommender():
 # ---------------------------------------------------------------------------
 # Helper: render one song card
 # ---------------------------------------------------------------------------
+_CONF_COLOR = {"High": "#22c55e", "Medium": "#f59e0b", "Low": "#ef4444"}
+_CONF_TITLE = {
+    "High":   "Strong match — genre and features align",
+    "Medium": "Partial match — genre not in catalog; best numeric fit",
+    "Low":    "Weak match — catalog gap; system is extrapolating",
+}
+
+
 def song_card(rank: int, song: dict, score: float, explanation: str) -> None:
     score_pct = int(score / 10 * 100)
+    conf  = confidence_label(score)
+    color = _CONF_COLOR[conf]
+    tip   = _CONF_TITLE[conf]
     reasons_html = "".join(
         f"<li>{r.strip()}</li>"
         for r in explanation.split("|")
@@ -219,6 +230,11 @@ def song_card(rank: int, song: dict, score: float, explanation: str) -> None:
     st.markdown(f"""
     <div class="song-card">
         <span class="rank-badge">#{rank}</span>
+        <span style="font-size:0.75em;font-weight:700;color:{color};
+                     background:rgba(0,0,0,0.25);border-radius:6px;
+                     padding:2px 8px;margin-left:6px;" title="{tip}">
+            {conf} confidence
+        </span>
         <div class="song-title">{song['title']}</div>
         <div class="song-artist">{song['artist']}</div>
         <span class="tag">{song['genre']}</span>
