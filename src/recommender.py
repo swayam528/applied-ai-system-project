@@ -1,6 +1,9 @@
 import csv
+import logging
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Song:
@@ -112,6 +115,7 @@ def load_songs(csv_path: str) -> List[Dict]:
                 "danceability": float(row["danceability"]),
                 "acousticness": float(row["acousticness"]),
             })
+    logger.info("Loaded %d songs from %s", len(songs), csv_path)
     return songs
 
 def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:

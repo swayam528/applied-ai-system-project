@@ -15,7 +15,83 @@ This version builds a content-based music recommender that matches songs to a us
 
 ---
 
-## Data Flow
+## System Architecture
+
+```mermaid
+flowchart TD
+    %% ── User Input ──────────────────────────────────────────────────────
+    subgraph INPUT["👤 Human Input"]
+        Q["Natural-language query\ne.g. 'chill music for studying'"]
+        P["Profile selection\ne.g. Late-Night Lofi"]
+    end
+
+    %% ── Data Layer ───────────────────────────────────────────────────────
+    subgraph DATA["📄 Data Layer"]
+        CSV[("songs.csv\n20 songs")]
+        LOAD["load_songs()"]
+        IDX["In-Memory Catalog Index\ngenre_index · mood_index\n── RAG Retrieval Store ──"]
+        CSV --> LOAD --> IDX
+    end
+
+    %% ── UI ───────────────────────────────────────────────────────────────
+    subgraph UI["🖥️ Streamlit UI  (app.py)"]
+        AITAB["AI Chat tab"]
+        CTAB["Classic Profiles tab"]
+    end
+
+    %% ── AI Path ──────────────────────────────────────────────────────────
+    subgraph AI["🤖 AI Layer  (ai_recommender.py)"]
+        CTX["RAG Injection\nCatalog summary → system prompt"]
+        GEMINI["Gemini API\ngemini-flash-latest"]
+
+        subgraph LOOP["⟳ Agentic Tool Loop"]
+            T1["get_catalog_info\nreturns genres · moods"]
+            T2["search_songs\nfilters catalog rows"]
+            T3["score_and_rank\ncalls score_song()"]
+        end
+    end
+
+    %% ── Scoring Engine ───────────────────────────────────────────────────
+    subgraph SCORE["🧮 Scoring Engine  (recommender.py)"]
+        SF["score_song()\n6 weighted features → 0–10 pts\ngenre · mood · energy\nvalence · tempo · acousticness"]
+    end
+
+    %% ── Testing ──────────────────────────────────────────────────────────
+    subgraph TEST["🧪 Reliability Layer  (pytest)"]
+        direction LR
+        TT["Tool tests\nget_catalog_info ✓\nsearch_songs ✓\nscore_and_rank ✓"]
+        IT["Integration test\nfull agentic loop ✓\nerror handling ✓"]
+        UT["Unit tests\nRecommender · score_song ✓"]
+        MOCK["Mocked Gemini client\n(runs fully offline)"]
+        MOCK --> TT & IT
+    end
+
+    %% ── Output ───────────────────────────────────────────────────────────
+    OUT["📋 Ranked Recommendations\ntitle · artist · score · reasons"]
+
+    %% ── Connections ──────────────────────────────────────────────────────
+    Q --> AITAB --> CTX
+    IDX --> CTX --> GEMINI
+    GEMINI -- "tool_use" --> T1 & T2 & T3
+    T1 & T2 --> IDX
+    T3 --> SF --> T3
+    GEMINI -- "end_turn" --> OUT
+
+    P --> CTAB --> SF --> OUT
+    OUT --> UI
+
+    %% ── Human-in-the-loop ────────────────────────────────────────────────
+    OUT -. "Human reviews &\nre-prompts if needed" .-> Q
+
+    %% ── Testing hooks ────────────────────────────────────────────────────
+    TT -.-> LOOP
+    IT -.-> GEMINI
+    UT -.-> SF
+```
+
+---
+
+## Scoring Data Flow
 
 ```mermaid
 flowchart TD

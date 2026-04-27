@@ -1,21 +1,42 @@
 """
-Command line runner for the Music Recommender Simulation.
+Command line runner for the Music Recommender.
 
-Run with:  python src/main.py
+Modes
+-----
+Classic (default)
+    Runs the original weighted-scoring recommender against all built-in
+    profiles and prints a formatted leaderboard to stdout.
+
+    python -m src.main
+
+AI mode  (requires ANTHROPIC_API_KEY environment variable)
+    Starts an interactive loop powered by Claude.  Type a natural-language
+    music request and receive ranked recommendations with explanations.
+
+    python -m src.main --ai
+
+Options
+-------
+  --ai        Use the Claude-powered interactive mode.
+  -v, --verbose   Enable DEBUG-level logging.
 """
 
+import argparse
+import logging
 import os
-from recommender import load_songs, recommend_songs
+import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(_HERE, "..", "data", "songs.csv")
 
-# ---------------------------------------------------------------------------
-# User profiles
-# ---------------------------------------------------------------------------
+# Ensure src/ is importable when this module is run via -m src.main or directly.
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
 
-# Standard profiles
-PROFILES = {
+# ---------------------------------------------------------------------------
+# Built-in user profiles (classic mode)
+# ---------------------------------------------------------------------------
+PROFILES: dict = {
     "Late-Night Study (Lofi / Chill)": {
         "favorite_genre": "lofi",
         "favorite_mood":  "chill",
@@ -49,9 +70,6 @@ PROFILES = {
     # -------------------------------------------------------------------
     # Adversarial / edge-case profiles
     # -------------------------------------------------------------------
-    # EDGE CASE 1: Conflicting energy + mood
-    # energy: 0.95 (mosh-pit intensity) but mood: sad
-    # Tests whether high energy rescues a dark-mood song or if mood weight wins.
     "Conflicting: High Energy + Sad Mood": {
         "favorite_genre": "metal",
         "favorite_mood":  "sad",
@@ -62,10 +80,6 @@ PROFILES = {
         "weights": {"genre": 3.0, "mood": 2.0, "energy": 2.0,
                     "acousticness": 1.5, "valence": 1.0, "tempo": 0.5},
     },
-    # EDGE CASE 2: Genre that does not exist in the catalog
-    # No song will earn genre points — forces the system to rank entirely
-    # on continuous features.  Exposes whether numeric scores alone
-    # produce a "sensible" fallback or just noise.
     "Unknown Genre (k-pop)": {
         "favorite_genre": "k-pop",
         "favorite_mood":  "happy",
@@ -76,10 +90,6 @@ PROFILES = {
         "weights": {"genre": 3.0, "mood": 2.0, "energy": 2.0,
                     "acousticness": 1.5, "valence": 1.0, "tempo": 0.5},
     },
-    # EDGE CASE 3: Extreme acoustic + low energy preference
-    # Targets the very bottom of the energy/tempo range.
-    # Should surface classical/folk; tests whether the system over-favors
-    # lofi (which is close but not the extreme).
     "Extreme Acoustic Minimalist": {
         "favorite_genre": "classical",
         "favorite_mood":  "melancholy",
@@ -93,11 +103,24 @@ PROFILES = {
 }
 
 # ---------------------------------------------------------------------------
-# Output helpers
+# Logging setup
 # ---------------------------------------------------------------------------
+def setup_logging(verbose: bool = False) -> None:
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+        datefmt="%H:%M:%S",
+        level=level,
+    )
 
+
+# ---------------------------------------------------------------------------
+# Classic mode helpers
+# ---------------------------------------------------------------------------
 def print_recommendations(profile_name: str, user_prefs: dict, songs: list) -> None:
     """Print a formatted leaderboard for one user profile."""
+    from recommender import recommend_songs
+
     recommendations = recommend_songs(user_prefs, songs, k=5)
 
     print()
@@ -120,12 +143,101 @@ def print_recommendations(profile_name: str, user_prefs: dict, songs: list) -> N
     print()
 
 
-def main() -> None:
+def run_classic_mode() -> None:
+    """Run the original batch recommender against all built-in profiles."""
+    from recommender import load_songs
+
+    log = logging.getLogger(__name__)
     songs = load_songs(DATA_PATH)
-    print(f"Loaded songs: {len(songs)}\n")
+    log.info("Classic mode — running %d profiles", len(PROFILES))
 
     for profile_name, user_prefs in PROFILES.items():
         print_recommendations(profile_name, user_prefs, songs)
+
+
+# ---------------------------------------------------------------------------
+# AI interactive mode
+# ---------------------------------------------------------------------------
+def run_ai_mode() -> None:
+    """Run the interactive Claude-powered recommender."""
+    import sys
+
+    log = logging.getLogger(__name__)
+
+    if not os.environ.get("GOOGLE_API_KEY"):
+        print(
+            "Error: GOOGLE_API_KEY is not set.\n"
+            "Get a free key at https://aistudio.google.com (sign in with Google).\n"
+            "Then export it:\n"
+            "  export GOOGLE_API_KEY=AIza...\n"
+            "Or copy .env.example to .env and fill it in.\n"
+        )
+        sys.exit(1)
+
+    # Load dotenv if available (optional convenience)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        log.debug("Loaded .env file")
+    except ImportError:
+        pass
+
+    from recommender import load_songs
+    from ai_recommender import AIRecommender
+
+    songs = load_songs(DATA_PATH)
+    rec = AIRecommender(songs)
+
+    print("\nAI Music Recommender  (powered by Claude)")
+    print("Describe what you want in plain English.  Type 'quit' to exit.\n")
+    print("Examples:")
+    print('  "I need something chill and acoustic for late-night studying"')
+    print('  "Pump me up for a workout — high energy, no ballads"')
+    print('  "Sad indie vibes, something melancholy but beautiful"\n')
+
+    while True:
+        try:
+            query = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nGoodbye!")
+            break
+
+        if not query:
+            continue
+        if query.lower() in ("quit", "exit", "q", "bye"):
+            print("Goodbye!")
+            break
+
+        log.debug("Sending query to AIRecommender: %r", query)
+        response = rec.recommend(query)
+        print(f"\nAssistant:\n{response}\n")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Music Recommender — classic scoring or Claude-powered AI mode."
+    )
+    parser.add_argument(
+        "--ai",
+        action="store_true",
+        help="Use the interactive Claude-powered AI mode (requires ANTHROPIC_API_KEY).",
+    )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Enable DEBUG-level logging.",
+    )
+    args = parser.parse_args()
+
+    setup_logging(args.verbose)
+
+    if args.ai:
+        run_ai_mode()
+    else:
+        run_classic_mode()
 
 
 if __name__ == "__main__":
