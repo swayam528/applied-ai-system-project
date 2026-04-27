@@ -1,17 +1,20 @@
-# 🎵 Music Recommender Simulation
+# 🎵 AI Music Recommender
 
-## Project Summary
+> Content-based music recommendations powered by Google Gemini — featuring RAG retrieval, an agentic tool loop, a transparent weighted scoring engine, and a Streamlit UI.
 
-In this project you will build and explain a small music recommender system.
+---
 
-Your goal is to:
+## Original Project (Modules 1–3)
 
-- Represent songs and a user "taste profile" as data
-- Design a scoring rule that turns that data into recommendations
-- Evaluate what your system gets right and wrong
-- Reflect on how this mirrors real world AI recommenders
+This project began as the **Music Recommender Simulation** built across Modules 1–3. The original goal was to represent songs and user taste profiles as structured data, then design a transparent weighted scoring rule that could rank 20 catalog songs against any user profile and explain every decision. It demonstrated the foundations of content-based filtering — how genre, mood, energy, tempo, valence, and acousticness can be combined into a single explainable score — without relying on any external AI model or API.
 
-This version builds a content-based music recommender that matches songs to a user's stated preferences using a weighted scoring system. Each song is represented by a set of descriptive features (genre, mood, energy, tempo, and valence), and each user profile stores the features they care about most along with how much weight to give each one. The recommender scores every song in the catalog against the user's profile and returns the top matches. The goal is to make the scoring logic transparent and easy to inspect, so it is clear exactly why a song was or was not recommended.
+---
+
+## What This Project Does and Why It Matters
+
+This project takes that scoring foundation and wraps it with a real AI layer: a **Retrieval-Augmented Generation (RAG)** pipeline and an **agentic tool-use workflow** powered by Google Gemini. Instead of requiring a user to fill out a preference form, they can now type plain English — *"I need something chill for late-night studying"* — and the AI interprets that request, searches the catalog, runs the scoring formula, and returns ranked recommendations with explanations.
+
+This matters because it closes the gap between academic recommender-system theory and the kind of natural-language AI interfaces that users actually expect today. Every recommendation is still fully explainable (the scoring formula is unchanged), but the front door is now a conversation instead of a spreadsheet.
 
 ---
 
@@ -89,274 +92,277 @@ flowchart TD
     UT -.-> SF
 ```
 
----
+### Architecture in plain English
 
-## Scoring Data Flow
+There are two parallel paths through the system.
 
-```mermaid
-flowchart TD
-    A([🧑 User Preferences\nfavorite_genre · favorite_mood\ntarget_energy · target_tempo\ntarget_valence · likes_acoustic]) --> B
+**AI path (RAG + Agentic):** The user's natural-language query enters the Streamlit chat tab. `AIRecommender` builds a system prompt that includes a pre-retrieved catalog summary (genres, moods, song count) — this is the RAG injection step. Gemini receives that context and then autonomously decides which tools to call. It typically calls `search_songs` to narrow candidates, then `score_and_rank` to get objective scores from the same weighted formula used in the classic path. When Gemini is satisfied it returns a final text answer (`end_turn`), which is displayed in the chat. The loop is capped at 6 iterations as a safety guard.
 
-    B[(📄 songs.csv\n20 songs)] --> C
+**Classic path (deterministic scoring):** The user selects one of six pre-built profiles from a dropdown. `recommend_songs()` scores every song directly using `score_song()` and returns the top 5. No API call is made. This path is instant and fully reproducible.
 
-    C[🔁 For each song in catalog]
-
-    C --> D1[Genre match?\n+3.0 or +0.0]
-    C --> D2[Mood match?\n+2.0 or +0.0]
-    C --> D3[Energy similarity\n2.0 × 1 - diff]
-    C --> D4[Acousticness similarity\n1.5 × 1 - diff]
-    C --> D5[Valence similarity\n1.0 × 1 - diff]
-    C --> D6[Tempo similarity\n0.5 × 1 - norm_diff]
-
-    D1 & D2 & D3 & D4 & D5 & D6 --> E[🧮 Sum all terms\nScore out of 10.0]
-
-    E --> F[📋 Scored song list\nsong + score + reasons]
-
-    F --> G[⬇️ Sort descending by score]
-
-    G --> H[✂️ Slice top K results]
-
-    H --> I([🎵 Top K Recommendations\ntitle · artist · score · explanation])
-```
+**Testing layer:** All 22 tests run without a live API key. The Gemini client is replaced by a `MagicMock` that returns controlled responses, so the tool-execution logic, the agentic loop, and the error-handling path are all verified offline.
 
 ---
 
-## How The System Works
+## Project Structure
 
-Real-world recommenders like Spotify or YouTube Music typically combine two strategies: collaborative filtering (recommending what similar users liked) and content-based filtering (recommending songs that share features with songs you already enjoy). In practice, large platforms layer both on top of vast behavioral data — play counts, skips, replays, and playlist adds — to continuously refine what "you" means to the system. This simulation focuses on content-based filtering only, which means it will never surprise a user with something unexpected, but it also means every recommendation is fully explainable. The system will prioritize matching the features a user explicitly cares about — especially genre and mood — and use energy, tempo, and valence as tiebreakers.
+```
+applied-ai-system-project/
+├── app.py                      # Streamlit UI (run this for the demo)
+├── data/
+│   └── songs.csv               # 20-song catalog with 8 features per song
+├── src/
+│   ├── main.py                 # CLI runner (--ai flag for interactive mode)
+│   ├── recommender.py          # Scoring engine: load_songs, score_song, recommend_songs
+│   └── ai_recommender.py       # Gemini-powered RAG + agentic recommender
+├── tests/
+│   ├── test_recommender.py     # Unit tests for scoring engine
+│   └── test_ai_recommender.py  # Tests for AI layer (mocked, offline)
+├── .env.example                # API key template
+├── requirements.txt
+└── README.md
+```
 
 ---
 
-## Algorithm Recipe
+## Setup Instructions
 
-### Scoring formula
+### 1. Clone the repository
 
-Each song receives a score out of **10.0**. The score is the sum of six weighted terms:
-
-```
-score = genre_points + mood_points + energy_points
-      + acousticness_points + valence_points + tempo_points
+```bash
+git clone <your-repo-url>
+cd applied-ai-system-project
 ```
 
-### Step-by-step rules
+### 2. Create and activate a virtual environment (recommended)
 
-**Step 1 — Genre match (categorical, max 3.0 pts)**
+```bash
+python -m venv .venv
 
-```
-if song.genre == user.favorite_genre:
-    genre_points = 3.0
-else:
-    genre_points = 0.0
-```
+# Windows
+.venv\Scripts\activate
 
-_Why 3.0?_ The catalog has 13 distinct genres. A random song has only an ~8% chance of matching. Genre defines the entire sonic landscape (instrumentation, production, rhythm), so a match is the strongest signal available.
-
----
-
-**Step 2 — Mood match (categorical, max 2.0 pts)**
-
-```
-if song.mood == user.favorite_mood:
-    mood_points = 2.0
-else:
-    mood_points = 0.0
+# Mac / Linux
+source .venv/bin/activate
 ```
 
-_Why 2.0, not 3.0?_ Mood is important but more porous than genre. A "chill" classical piece and a "chill" lofi track share a mood label but sound completely different. Genre narrows the sonic world first; mood refines within it.
-
----
-
-**Step 3 — Energy similarity (continuous, max 2.0 pts)**
-
-```
-energy_points = 2.0 × (1 − |song.energy − user.target_energy|)
-```
-
-Energy spans 0.22–0.97 in the catalog — the widest numeric spread of any feature. It captures both tempo and intensity in one number, making it the best single proxy for "how this song feels."
-
----
-
-**Step 4 — Acousticness similarity (continuous, max 1.5 pts)**
-
-```
-acousticness_points = 1.5 × (1 − |song.acousticness − user.target_acousticness|)
-```
-
-Acousticness cleanly separates organic-sounding tracks (folk, jazz, classical, all ≥ 0.72) from produced ones (electronic, synthwave, hip-hop, all ≤ 0.22). Users tend to have a stable organic-vs-produced preference, so this feature earns more weight than valence.
-
----
-
-**Step 5 — Valence similarity (continuous, max 1.0 pts)**
-
-```
-valence_points = 1.0 × (1 − |song.valence − user.target_valence|)
-```
-
-Valence measures musical brightness (0 = dark, 1 = bright). Users tolerate more variation here — someone who wants "chill" music is fine with valence 0.55–0.75 — so the weight is lower.
-
----
-
-**Step 6 — Tempo similarity (continuous, max 0.5 pts)**
-
-```
-normalized_song_tempo  = song.tempo_bpm / 200
-normalized_user_tempo  = user.target_tempo / 200
-tempo_points = 0.5 × (1 − |normalized_song_tempo − normalized_user_tempo|)
-```
-
-Tempo is divided by 200 to convert BPM to the same 0–1 scale as the other features. It gets the lowest weight because energy already encodes much of what tempo communicates about intensity.
-
----
-
-### Weight summary
-
-| Feature      | Type                  | Max points | Why this weight                                       |
-| ------------ | --------------------- | ---------- | ----------------------------------------------------- |
-| Genre        | categorical match     | 3.0        | Rarest match (~8% chance), strongest sonic constraint |
-| Mood         | categorical match     | 2.0        | Strong signal but less precise than genre             |
-| Energy       | continuous similarity | 2.0        | Widest numeric range; best single feel proxy          |
-| Acousticness | continuous similarity | 1.5        | Cleanly separates organic vs produced                 |
-| Valence      | continuous similarity | 1.0        | Users tolerate wider variation                        |
-| Tempo        | continuous similarity | 0.5        | Redundant with energy; needs BPM normalization        |
-| **Total**    |                       | **10.0**   |                                                       |
-
----
-
-### `Song` features
-
-| Feature   | Type      | Description                               |
-| --------- | --------- | ----------------------------------------- |
-| `title`   | string    | Song name                                 |
-| `artist`  | string    | Artist name                               |
-| `genre`   | string    | e.g. pop, hip-hop, indie, classical       |
-| `mood`    | string    | e.g. happy, melancholy, hype, chill       |
-| `energy`  | float 0–1 | How intense or active the track feels     |
-| `tempo`   | int (BPM) | Beats per minute                          |
-| `valence` | float 0–1 | Musical positivity (0 = dark, 1 = bright) |
-
-### `UserProfile` features
-
-| Feature           | Type      | Description                                                                 |
-| ----------------- | --------- | --------------------------------------------------------------------------- |
-| `name`            | string    | User identifier                                                             |
-| `preferred_genre` | string    | The genre the user wants to hear                                            |
-| `preferred_mood`  | string    | The mood the user is in                                                     |
-| `energy_target`   | float 0–1 | How energetic the user wants songs to be                                    |
-| `weights`         | dict      | How much each feature matters (e.g. `{"genre": 3, "mood": 2, "energy": 1}`) |
-
-## Sample Output
-
-![Recommendation output](recommendationOutput.png)
-
-## Sample Output 2
-
-![Phase 4 Recommendation Output](recommendationOutput2.png)
-![Phase 4 Recommendation Output](image.png)
-![Phase 4 Recommendation Output](image2.png)
-![Phase 4 Recommendation Output](image3.png)
-![Phase 4 Recommendation Output](image4.png)
-![Phase 4 Recommendation Output](image5.png)
-
----
-
-## Getting Started
-
-### Setup
-
-1. Create a virtual environment (optional but recommended):
-
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate      # Mac or Linux
-   .venv\Scripts\activate         # Windows
-
-   ```
-
-2. Install dependencies
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Run the app:
+### 4. Add your Google API key
+
+Get a **free** key at [aistudio.google.com](https://aistudio.google.com) — sign in with Google, click **Get API key**, then **Create API key**. No credit card required.
 
 ```bash
-python -m src.main
+cp .env.example .env
+# Open .env and paste your key:
+# GOOGLE_API_KEY=AIzaSy...
 ```
 
-### Running Tests
+> The classic mode and all tests work without a key. Only the AI Chat tab requires it.
 
-Run the starter tests with:
+### 5. Run the app
 
 ```bash
-pytest
+streamlit run app.py
 ```
 
-You can add more tests in `tests/test_recommender.py`.
+Open [http://localhost:8501](http://localhost:8501) in your browser.
+
+### Alternative: CLI mode
+
+```bash
+python -m src.main            # classic batch mode (no key needed)
+python -m src.main --ai       # interactive AI chat in the terminal
+python -m src.main --verbose  # enable debug logging
+```
+
+### Run the tests
+
+```bash
+pytest                        # 22 tests, no API key needed
+pytest -v                     # verbose output
+```
 
 ---
 
-## Experiments You Tried
+## Sample Interactions
 
-### Experiment 1 — Weight shift: halve genre (3.0 → 1.5), double energy (2.0 → 4.0)
+### 1. AI Chat — late-night study session
 
-Tested on the High-Energy Pop profile. Baseline top-5:
+**Input:** `I need something chill for late-night studying`
 
-| Rank | Song | Score |
-|---|---|---|
-| 1 | Sunrise City (pop) | 9.53 |
-| 2 | Gym Hero (pop) | 7.77 |
-| 3 | Rooftop Lights (indie pop) | 6.15 |
-| 4 | Drop the Signal (electronic) | 4.67 |
-| 5 | Bailando en Fuego (latin) | 4.66 |
+**AI output:**
+```
+For your late-night study session, I recommend these chill, low-energy tracks
+to help you stay focused:
 
-After shift (genre 1.5, energy 4.0):
+1. Library Rain — Paper Lanterns  (9.57 / 10)
+   With its very low energy and chill lofi vibes, this track perfectly mimics
+   the peaceful atmosphere of a quiet library.
 
-| Rank | Song | Score |
-|---|---|---|
-| 1 | Sunrise City (pop) | 9.87 |
-| 2 | Gym Hero (pop) | 8.21 |
-| 3 | Rooftop Lights (indie pop) | 7.87 |
-| 4 | Bailando en Fuego (latin) | 6.62 |
-| 5 | Drop the Signal (electronic) | 6.59 |
+2. Midnight Coding — LoRoom  (9.25 / 10)
+   This lofi track is specifically designed for late-night productivity,
+   offering a steady, unobtrusive rhythm.
 
-**What changed:** The top 2 stayed the same (both pop with high energy), but the score gaps closed — non-pop songs climbed significantly. Drop the Signal jumped from 4.67 to 6.59 because its energy (0.94) is nearly perfect for the target (0.90), and that now earns 4.0 × 0.96 = 3.84 pts instead of 1.92. Halving the genre bonus didn't dethrone pop songs, but it made the catalog feel less "genre-locked" — energy-matching songs from other genres could compete.
+3. Focus Flow — LoRoom  (7.38 / 10)
+   While slightly more driven than the others, its "focused" mood is tailored
+   for maintaining deep concentration during long study blocks.
 
-**Conclusion:** The genre weight is the single biggest lever in the scoring formula. Halving it didn't change the winner but significantly changed which non-matching songs got surfaced. This confirms that genre acts as a hard filter more than a soft preference in the baseline.
+4. Spacewalk Thoughts — Orbit Bloom  (6.64 / 10)
+   If you need something more atmospheric, this ambient piece provides a calm,
+   spacey backdrop that won't distract you from your work.
+```
 
-### Experiment 2 — Profile comparison: what changed and why
-
-| Profile A | Profile B | Key difference in output |
-|---|---|---|
-| **Lofi / Chill** | **High-Energy Pop** | Lofi profile surfaces quiet, acoustic tracks (Library Rain, Midnight Coding). Pop profile surfaces bright, produced songs (Sunrise City, Gym Hero). The genre bonus drives both — changing genre changes the entire top result. |
-| **High-Energy Pop** | **Deep Intense Rock** | Both want high energy, but Rock gets Storm Runner clearly at #1 (only rock song). Pop gets Sunrise City. Gym Hero appears #2 for *both* because it has the right energy and a shared mood label ("intense" ≈ "high energy"). |
-| **Deep Intense Rock** | **Conflicting (Metal/Sad, energy 0.95)** | Rock profile is internally consistent — high energy + intense mood both point to the same songs. The conflicting profile cannot satisfy both halves: Iron Cathedral wins on genre + energy but is "angry" not "sad." The score drops from 9.74 to 7.81 for #1, showing the system is stressed. |
-| **Unknown Genre (k-pop)** | **Extreme Acoustic Minimalist** | Both expose catalog gaps. k-pop earns zero genre points so the system falls back to mood + numeric features — reasonable results but low confidence (all scores < 7.0). Classical earns one perfect match (9.63) then falls to 4.31 — the opposite problem: one song nails it, everything else is irrelevant. |
-
-**Plain-language takeaway on why Gym Hero keeps showing up:** Gym Hero is a pop song with very high energy (0.93) and almost no acoustic instruments. That combination happens to match a lot of different user targets numerically. The genre bonus alone (3.0 pts) makes it nearly impossible to push out of the top 3 for any pop listener, even when the mood is wrong. In real apps this is called a "popularity trap" — a small set of songs with broad feature coverage dominate rankings across many different user types.
-
-### Experiment 3 — Catalog diversity effect
-
-Lofi has 3 songs in the catalog; most genres have 1. When the lofi profile ran, the top 3 results were all lofi songs. When the classical profile ran, exactly 1 song served the genre — and the score cliff between #1 (9.63) and #2 (4.31) revealed how badly single-song genres fail their users.
+Behind the scenes Gemini called `score_and_rank` with inferred preferences (`genre: lofi`, `energy: ~0.35`, `likes_acoustic: true`) before writing this response. The scores come directly from the weighted formula — the AI did not invent them.
 
 ---
 
-## Limitations and Risks
+### 2. Classic Profile — High-Energy Pop Fan
 
-- **Tiny catalog**: 20 songs means most genre searches return only 1–3 matches. Recommendations for niche genres degrade to near-random beyond the #1 result.
-- **No memory**: The system starts fresh every run. It cannot learn that a user always skips metal songs or replays jazz ones.
-- **Genre is binary**: A "rock" listener gets zero genre points for a metal song, even though rock and metal are closely related. There is no concept of adjacent genres.
-- **Silent coverage gaps**: When no songs match the user's genre (e.g., k-pop), the system returns results without warning the user that it is guessing.
-- **Lyrics and language are invisible**: Two songs with identical feature values but completely different lyrical themes or languages are treated as identical by the scorer.
-- **Fixed weight ordering**: Genre is always more important than mood. Users who care deeply about mood over genre have no way to express that without editing the Python source code.
+**Profile settings:** genre=pop · mood=happy · energy=0.90 · acoustic=false
+
+| Rank | Song | Artist | Genre | Score |
+|------|------|--------|-------|-------|
+| #1 | Sunrise City | Neon Echo | pop | 9.53 |
+| #2 | Gym Hero | Max Pulse | pop | 7.77 |
+| #3 | Rooftop Lights | Indigo Parade | indie pop | 6.15 |
+| #4 | Drop the Signal | Flux Circuit | electronic | 4.67 |
+| #5 | Bailando en Fuego | La Tormenta | latin | 4.66 |
+
+The 2.78-point gap between #1 and #2 is entirely explained by mood: Sunrise City is tagged `happy` (matching the profile) while Gym Hero is `intense`. Genre matches both songs equally (+3.0 pts each). This makes the scoring logic easy to audit.
+
+---
+
+### 3. Classic Profile — Extreme Acoustic Minimalist (edge case)
+
+**Profile settings:** genre=classical · mood=melancholy · energy=0.10 · acoustic=true
+
+| Rank | Song | Artist | Genre | Score |
+|------|------|--------|-------|-------|
+| #1 | Sonata in Grey | Clara Voss | classical | 9.63 |
+| #2 | Empty Porch | River Hen | folk | 4.31 |
+| #3 | Spacewalk Thoughts | Orbit Bloom | ambient | 3.94 |
+| #4 | Dust and Rain | Hound Freely | blues | 3.81 |
+| #5 | Library Rain | Paper Lanterns | lofi | 3.74 |
+
+This is an intentional stress test. The catalog has only one classical song, so #1 nearly maxes out (9.63) and everything else scores below 4.5 — a 5-point cliff that exposes a real limitation: single-genre catalogs fail users beyond the top result.
+
+---
+
+## Design Decisions
+
+### Why content-based filtering instead of collaborative filtering?
+
+Collaborative filtering requires behavioral data — play counts, skips, ratings — that does not exist for a new catalog. Content-based filtering works from song features alone and produces fully explainable results: every recommendation can be traced back to a specific feature match and weight. For a 20-song demo catalog this is the only viable approach, and the explainability is actually a feature for a portfolio project.
+
+### Why RAG rather than asking Gemini to recommend from memory?
+
+Gemini has no knowledge of the specific 20 songs in `songs.csv` — they are not in its training data. Without retrieval, the model would hallucinate song names. By indexing the catalog in memory and injecting a summary into the system prompt before the model speaks, every recommendation is anchored to real retrieved data. This is the same principle used in enterprise RAG systems, just at a smaller scale.
+
+### Why agentic tool use instead of a single prompt?
+
+A single-shot prompt would require hand-crafting all 20 song descriptions into the context window on every query. Tool use lets the model pull only what it needs: it calls `search_songs` to narrow to a genre, then `score_and_rank` to get objective scores, then writes its final answer. This mirrors production RAG architectures and keeps the prompt lean. The trade-off is latency — two or three API round-trips add ~2 seconds compared to a single call.
+
+### Why a 6-iteration safety cap on the agentic loop?
+
+Without a cap, a misbehaving model could loop indefinitely and exhaust the API quota. Six iterations is more than enough for any realistic query (observed maximum in testing: 2 iterations) while preventing runaway behavior. This is a standard guardrail in agentic systems.
+
+### Why `gemini-flash-latest` instead of a heavier model?
+
+Speed and cost. The task — parsing a music preference, calling two tools, writing a short list — does not require the reasoning depth of a frontier model. Flash-tier models handle it in under 2 seconds. For a class project demo, responsiveness matters more than marginal quality gains.
+
+### Trade-offs accepted
+
+| Decision | Benefit | Cost |
+|----------|---------|------|
+| 20-song CSV catalog | Simple, reproducible, no scraping | Genre gaps make edge-case profiles unreliable |
+| Binary genre matching | Transparent, zero false positives | Rock ≠ Metal even though they are adjacent |
+| Fixed weight ordering | Deterministic, auditable | Users cannot reorder priorities without editing code |
+| In-memory index | Zero latency on retrieval | Does not scale beyond a few thousand songs |
+
+---
+
+## Scoring Formula
+
+Each song receives a score out of **10.0** — the sum of six weighted terms:
+
+```
+score = genre_pts + mood_pts + energy_pts + acousticness_pts + valence_pts + tempo_pts
+```
+
+| Feature | Type | Max pts | Rationale |
+|---------|------|---------|-----------|
+| Genre | categorical match | 3.0 | ~8% random match rate; defines the entire sonic world |
+| Mood | categorical match | 2.0 | Strong signal, but less precise than genre |
+| Energy | continuous similarity | 2.0 | Widest numeric range (0.22–0.97); best single feel proxy |
+| Acousticness | continuous similarity | 1.5 | Cleanly separates organic vs produced |
+| Valence | continuous similarity | 1.0 | Users tolerate wider variation here |
+| Tempo | continuous similarity | 0.5 | Partially redundant with energy; needs BPM normalization |
+
+Continuous features use a proximity formula: `weight × (1 − |song_value − user_target|)`.
+
+---
+
+## Testing Summary
+
+### What the tests cover
+
+22 tests across two files, all runnable offline without an API key:
+
+| Test group | File | What it checks |
+|---|---|---|
+| `TestGetCatalogInfo` | `test_ai_recommender.py` | Tool returns correct genre/mood counts, sorted output |
+| `TestSearchSongs` | `test_ai_recommender.py` | Filtering by genre, mood, both, neither; field presence; empty results |
+| `TestScoreAndRank` | `test_ai_recommender.py` | k-result slicing, descending sort, score bounds (0–10), genre-match wins |
+| Integration | `test_ai_recommender.py` | Full agentic loop with mocked Gemini; API error returns safe message |
+| Unit | `test_recommender.py` | `Recommender.recommend()` sort order; `explain_recommendation()` returns non-empty string |
+
+### What worked
+
+- The mocked integration test faithfully simulates the two-iteration agentic loop (tool call → final answer) without hitting the API, which means the test suite runs in under 1 second.
+- The tool-execution tests caught two real bugs during development: `search_songs` was accidentally filtering on `song["genre"].lower()` while the CSV stores genres in lowercase already, and `score_and_rank` was dropping the `reasons` key from its output in an early version.
+- The `test_recommend_handles_api_error` test confirmed that a network failure returns a human-readable message instead of an uncaught exception.
+
+### What didn't work / limitations found
+
+- **Model name drift:** The original default (`gemini-1.5-flash`) was not available on the free-tier endpoint; the app silently failed until the model was changed to `gemini-flash-latest`. A version-pinning strategy (listing models at startup and warning on mismatch) would prevent this in production.
+- **gRPC shutdown warning:** The `google-generativeai` library emits a `grpc_wait_for_shutdown_with_timeout() timed out` warning on exit. This is a known upstream issue in the library and does not affect results, but it looks alarming in a demo terminal.
+- **Catalog gaps in AI mode:** When asked for a genre not in the catalog (e.g., "k-pop"), Gemini falls back to mood and numeric features and returns plausible-sounding results — but with no warning to the user that genre matching failed entirely. A guardrail that checks genre coverage before generating the response would improve honesty.
+
+### What I learned from testing
+
+Writing tests before running the live API revealed that the tool dispatcher was the most failure-prone component — it has no type enforcement on its inputs, so a model returning a string `"true"` instead of a boolean `true` for `likes_acoustic` would silently corrupt the score. Adding `bool(tool_input["likes_acoustic"])` and `float(tool_input.get("target_energy", 0.5))` coercions fixed this class of bug entirely.
 
 ---
 
 ## Reflection
 
-[**Model Card**](model_card.md) | [**Profile Comparisons**](reflection.md)
+Building this project from a scoring formula all the way to a live AI chat interface made three things concrete that were previously abstract.
 
-Building this recommender made the hidden work inside apps like Spotify suddenly visible. Every time Spotify plays "something you'll love," it is running a version of this loop — scoring candidates, ranking them, and slicing the top results — except with millions of songs, hundreds of features, and years of behavioral data instead of 20 rows in a CSV. The surprising part was how convincing a six-feature weighted sum can feel when the weights are tuned to the right user. Library Rain appearing at #1 for the lofi/chill profile with a score of 9.67 felt genuinely correct, even though the "intelligence" behind it was six additions and a sort.
+**Retrieval is what makes generation trustworthy.** Gemini cannot know what songs are in a custom CSV file. The moment I ran the system without RAG injection — just asking the model to "recommend some lofi music" — it invented artists and song titles with complete confidence. Adding retrieval did not just improve the output; it fundamentally changed what the model was doing. It went from pattern-matching on training data to reasoning about a real, specific dataset. That distinction matters enormously in any production AI application.
 
-The bias experiments were the most instructive part. When the genre weight was halved, the rankings shifted but the same pop songs still dominated — which revealed that the entire feel of the system changed not because of one setting but because of the interaction between all six weights together. That is the same dynamic that makes real recommenders so hard to audit: changing one parameter rarely produces a clean, explainable outcome. It just shifts which songs the bias favors. The biggest risk in a system like this is not a bug — it is a design assumption that seems reasonable on paper but silently disadvantages users whose tastes do not fit the mold the designer imagined.
+**Agentic loops are powerful but need guardrails.** Watching the model autonomously decide to call `search_songs` first, then `score_and_rank`, then write its answer — without being told to do so — was genuinely surprising. It behaves like a junior analyst who knows which tools to reach for. But the same autonomy that makes it useful makes it unpredictable: without the iteration cap and the error handler, a bad model response could loop forever or surface a raw Python traceback to the user. Every agentic system needs an explicit maximum-retry boundary and graceful degradation.
 
+**Explainability is a first-class feature, not an afterthought.** The weighted scoring formula was originally built for Module 1 as a teaching exercise. In the final system it serves a production purpose: when Gemini calls `score_and_rank`, it receives numerical reasons alongside scores, and it uses those reasons to write its explanations. A black-box similarity score would have produced worse, less trustworthy AI responses. The investment in transparent scoring paid dividends two modules later, which is a good argument for building interpretable systems from the start even when it is not strictly required.
+
+---
+
+## Limitations and Known Issues
+
+- **Small catalog (20 songs):** Most genres have only 1–3 representatives. Niche genre requests degrade gracefully but cannot be truly satisfied.
+- **No personalization over time:** The system has no memory between sessions. It cannot learn that a user always skips metal or consistently replays jazz.
+- **Binary genre matching:** Rock and metal share no points despite being adjacent genres. A genre-similarity matrix would address this.
+- **gRPC shutdown warning:** Cosmetic only — does not affect results. Upstream `google-generativeai` issue.
+
+---
+
+## References
+
+- [Google Gemini API — Function Calling](https://ai.google.dev/gemini-api/docs/function-calling)
+- [Streamlit Documentation](https://docs.streamlit.io)
+- [Retrieval-Augmented Generation — Lewis et al. 2020](https://arxiv.org/abs/2005.11401)
+- [Spotify Audio Features Reference](https://developer.spotify.com/documentation/web-api/reference/get-audio-features)
