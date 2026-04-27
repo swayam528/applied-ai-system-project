@@ -378,15 +378,65 @@ A score below 7.0 is only possible when the genre bonus (3.0 pts) is missed, whi
 
 ---
 
-## Reflection
+## Reflection and Ethics
 
-Building this project from a scoring formula all the way to a live AI chat interface made three things concrete that were previously abstract.
+### Limitations and biases in the system
 
-**Retrieval is what makes generation trustworthy.** Gemini cannot know what songs are in a custom CSV file. The moment I ran the system without RAG injection — just asking the model to "recommend some lofi music" — it invented artists and song titles with complete confidence. Adding retrieval did not just improve the output; it fundamentally changed what the model was doing. It went from pattern-matching on training data to reasoning about a real, specific dataset. That distinction matters enormously in any production AI application.
+**Catalog representation bias** is the most significant structural problem. The 20-song catalog was hand-curated with a clear Western pop-music worldview: it includes lofi, rock, jazz, and classical but no K-pop, Afrobeats, bhangra, or Latin genres beyond one token entry. A user whose entire musical identity sits outside this narrow slice gets a Medium or Low confidence result by default — not because their taste is unusual, but because the dataset does not represent them. This is a common and serious issue in real recommender systems: the catalog reflects whoever built it, and underrepresented users get systematically worse results.
 
-**Agentic loops are powerful but need guardrails.** Watching the model autonomously decide to call `search_songs` first, then `score_and_rank`, then write its answer — without being told to do so — was genuinely surprising. It behaves like a junior analyst who knows which tools to reach for. But the same autonomy that makes it useful makes it unpredictable: without the iteration cap and the error handler, a bad model response could loop forever or surface a raw Python traceback to the user. Every agentic system needs an explicit maximum-retry boundary and graceful degradation.
+**Genre binary matching** treats adjacent genres as completely unrelated. A rock listener gets zero genre points for a metal song, even though the two genres share instrumentation, production style, and audience overlap. The scoring formula cannot express "this is close but not exactly right" for categorical features — it is either a match (3.0 pts) or a total miss (0.0 pts). This penalizes users who have nuanced genre preferences.
 
-**Explainability is a first-class feature, not an afterthought.** The weighted scoring formula was originally built for Module 1 as a teaching exercise. In the final system it serves a production purpose: when Gemini calls `score_and_rank`, it receives numerical reasons alongside scores, and it uses those reasons to write its explanations. A black-box similarity score would have produced worse, less trustworthy AI responses. The investment in transparent scoring paid dividends two modules later, which is a good argument for building interpretable systems from the start even when it is not strictly required.
+**The popularity trap** is a subtler bias. Songs with broad numerical appeal — high energy, low acousticness, positive valence — float to the top of many profiles even when they do not match the requested genre or mood. In the experiments, *Gym Hero* appeared in the top 3 for both pop and rock profiles despite being pop-tagged, because its numerical features matched the rock profile's energy target closely. In a real-world system this means a small number of songs get over-recommended, crowding out catalog diversity.
+
+**Weight ordering is fixed and opinionated.** The system always treats genre as more important than mood, mood as more important than energy, and so on. A user who genuinely cares more about mood than genre has no way to express that preference without editing Python source code. The weights encode the designer's assumptions about what listeners value, not the actual listener's preferences.
+
+---
+
+### Could this AI be misused?
+
+A music recommender seems harmless, but three misuse vectors are worth naming honestly.
+
+**Mood manipulation.** The system can be deliberately configured to serve emotionally vulnerable users a steady stream of sad, low-valence music. If the `target_valence` and `mood` fields were set by a third party rather than the user, the recommender could function as a mood-suppression tool. Real streaming platforms have faced criticism for exactly this — algorithmic depression spirals where the recommendation engine keeps surfacing darker content because the user keeps engaging with it. This system has no session memory and no feedback loop, which limits this risk, but adding either feature without safeguards would recreate it.
+
+**Payola-style catalog bias.** In a commercial deployment, the scoring weights could be quietly adjusted to favor songs from labels or artists who pay for placement. Because the weights are tuned by the developer and invisible to the user, the manipulation would be undetectable from the outside. The defense is transparency: publishing the weights and making the scoring formula auditable (as this project does) makes gaming visible.
+
+**API key exposure and data privacy.** The AI Chat mode sends user queries to Google's Gemini API. If a user types something like *"recommend music for my breakup"* or *"something for my anxiety"*, that personal context is transmitted to an external service and subject to Google's data retention policies. A responsible deployment would include a privacy notice before the first query, offer an opt-out, and avoid logging query content beyond what is necessary.
+
+**Prevention in this project:** The `.env` file is git-ignored to prevent accidental key commits, the weights are fully documented in the README so anyone can audit them, and the scoring formula is plain readable Python with no hidden adjustments.
+
+---
+
+### What surprised me while testing reliability
+
+Two things genuinely surprised me.
+
+**The missing-genre fallback was more coherent than expected.** I designed the k-pop edge case to expose a hard failure — zero genre points, total collapse. What actually happened was a score of 6.67 with *Sunrise City* (pop, happy, high energy) at #1. The numeric features found a reasonable stylistic neighbor even with no genre match. This was encouraging for robustness but also a little alarming: the system returned a confident-sounding result without any signal to the user that it was guessing. That is what motivated adding the confidence label — the raw score alone was not enough to distinguish "great match" from "best we could do."
+
+**The model name failed silently in a way that looked like a bug.** When the default model was set to `gemini-1.5-flash`, the app returned the string `"Sorry — there was a problem contacting the AI service"` with no indication of why. The actual cause — a 404 from the API because that model name did not exist on the free-tier endpoint — was buried in a log line at DEBUG level. I spent time checking the API key, the network, and the tool dispatcher before finding it. The lesson: when an AI API fails, the error message is almost never self-explanatory, and catching the raw exception and logging its full text is far more important than I initially thought.
+
+---
+
+### Collaboration with AI during this project
+
+**One instance where the AI suggestion was genuinely helpful.**
+
+While building the tool dispatcher in `ai_recommender.py`, the AI pointed out that Gemini sometimes returns `"true"` (a string) instead of `true` (a boolean) for the `likes_acoustic` parameter in tool calls, depending on how the model formats its JSON output. Without the suggested fix — wrapping inputs in `bool()` and `float()` coercions before passing them to `score_song()` — the acousticness calculation would receive a string and silently produce a wrong score. This was not something I would have caught without running the live API dozens of times to observe the model's inconsistent output format. The suggestion reflected genuine knowledge of how LLM tool-call outputs behave in practice, and it protected a real failure mode that the tests alone would not have caught.
+
+**One instance where the AI suggestion was flawed.**
+
+The AI initially recommended `gemini-1.5-flash` as the default model — described as widely available, free-tier compatible, and stable. This turned out to be incorrect for this API key and endpoint configuration: the model returned a 404 error with `limit: 0` on the free tier. The AI had suggested it with confidence and without qualification, and I only discovered the problem after deploying and testing the live key. The correct model (`gemini-flash-latest`) was found by calling `list_models()` at runtime — something the AI should have suggested as a discovery step rather than assuming a specific version string would work. This is a reminder that AI suggestions about external service configurations require independent verification, because the model's training data may not reflect current API availability.
+
+---
+
+### What this project taught me about AI and problem-solving
+
+Building this project from a scoring formula all the way to a live AI chat interface made three things concrete that were abstract before.
+
+**Retrieval is what makes generation trustworthy.** Gemini cannot know what songs are in a custom CSV file. Without RAG injection the model hallucinated artist names and song titles with complete confidence. Adding retrieval did not just improve the output — it changed what the model was fundamentally doing: from pattern-matching on training data to reasoning about a specific dataset I control. That distinction is the difference between a demo and a reliable system.
+
+**Agentic autonomy requires explicit limits.** Watching the model decide to call `search_songs`, then `score_and_rank`, then write its answer — without being told the sequence — was impressive. But the same autonomy that made it useful made it unpredictable. Without the 6-iteration cap and the `try/except` around every API call, a misbehaving model response could loop indefinitely or expose a raw stack trace to a user. Every degree of autonomy you give an AI system needs a corresponding guardrail.
+
+**Explainability is infrastructure, not decoration.** The weighted scoring formula was a Module 1 teaching exercise. By the final system it was doing real work: Gemini used the `reasons` list from `score_and_rank` to write its explanations. A black-box similarity score would have made the AI's output less trustworthy and harder to debug. Building interpretable systems from the beginning is not just good ethics — it makes every downstream component easier to build and test.
 
 ---
 
