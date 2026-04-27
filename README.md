@@ -12,7 +12,7 @@ This project began as the **Music Recommender Simulation** built across Modules 
 
 ## What This Project Does and Why It Matters
 
-This project takes that scoring foundation and wraps it with a real AI layer: a **Retrieval-Augmented Generation (RAG)** pipeline and an **agentic tool-use workflow** powered by Google Gemini. Instead of requiring a user to fill out a preference form, they can now type plain English — *"I need something chill for late-night studying"* — and the AI interprets that request, searches the catalog, runs the scoring formula, and returns ranked recommendations with explanations.
+This project takes that scoring foundation and wraps it with a real AI layer: a **Retrieval-Augmented Generation (RAG)** pipeline and an **agentic tool-use workflow** powered by Google Gemini. Instead of requiring a user to fill out a preference form, they can now type plain English — _"I need something chill for late-night studying"_ — and the AI interprets that request, searches the catalog, runs the scoring formula, and returns ranked recommendations with explanations.
 
 This matters because it closes the gap between academic recommender-system theory and the kind of natural-language AI interfaces that users actually expect today. Every recommendation is still fully explainable (the scoring formula is unchanged), but the front door is now a conversation instead of a spreadsheet.
 
@@ -196,6 +196,7 @@ pytest -v                     # verbose output
 **Input:** `I need something chill for late-night studying`
 
 **AI output:**
+
 ```
 For your late-night study session, I recommend these chill, low-energy tracks
 to help you stay focused:
@@ -225,13 +226,13 @@ Behind the scenes Gemini called `score_and_rank` with inferred preferences (`gen
 
 **Profile settings:** genre=pop · mood=happy · energy=0.90 · acoustic=false
 
-| Rank | Song | Artist | Genre | Score |
-|------|------|--------|-------|-------|
-| #1 | Sunrise City | Neon Echo | pop | 9.53 |
-| #2 | Gym Hero | Max Pulse | pop | 7.77 |
-| #3 | Rooftop Lights | Indigo Parade | indie pop | 6.15 |
-| #4 | Drop the Signal | Flux Circuit | electronic | 4.67 |
-| #5 | Bailando en Fuego | La Tormenta | latin | 4.66 |
+| Rank | Song              | Artist        | Genre      | Score |
+| ---- | ----------------- | ------------- | ---------- | ----- |
+| #1   | Sunrise City      | Neon Echo     | pop        | 9.53  |
+| #2   | Gym Hero          | Max Pulse     | pop        | 7.77  |
+| #3   | Rooftop Lights    | Indigo Parade | indie pop  | 6.15  |
+| #4   | Drop the Signal   | Flux Circuit  | electronic | 4.67  |
+| #5   | Bailando en Fuego | La Tormenta   | latin      | 4.66  |
 
 The 2.78-point gap between #1 and #2 is entirely explained by mood: Sunrise City is tagged `happy` (matching the profile) while Gym Hero is `intense`. Genre matches both songs equally (+3.0 pts each). This makes the scoring logic easy to audit.
 
@@ -241,13 +242,13 @@ The 2.78-point gap between #1 and #2 is entirely explained by mood: Sunrise City
 
 **Profile settings:** genre=classical · mood=melancholy · energy=0.10 · acoustic=true
 
-| Rank | Song | Artist | Genre | Score |
-|------|------|--------|-------|-------|
-| #1 | Sonata in Grey | Clara Voss | classical | 9.63 |
-| #2 | Empty Porch | River Hen | folk | 4.31 |
-| #3 | Spacewalk Thoughts | Orbit Bloom | ambient | 3.94 |
-| #4 | Dust and Rain | Hound Freely | blues | 3.81 |
-| #5 | Library Rain | Paper Lanterns | lofi | 3.74 |
+| Rank | Song               | Artist         | Genre     | Score |
+| ---- | ------------------ | -------------- | --------- | ----- |
+| #1   | Sonata in Grey     | Clara Voss     | classical | 9.63  |
+| #2   | Empty Porch        | River Hen      | folk      | 4.31  |
+| #3   | Spacewalk Thoughts | Orbit Bloom    | ambient   | 3.94  |
+| #4   | Dust and Rain      | Hound Freely   | blues     | 3.81  |
+| #5   | Library Rain       | Paper Lanterns | lofi      | 3.74  |
 
 This is an intentional stress test. The catalog has only one classical song, so #1 nearly maxes out (9.63) and everything else scores below 4.5 — a 5-point cliff that exposes a real limitation: single-genre catalogs fail users beyond the top result.
 
@@ -277,12 +278,12 @@ Speed and cost. The task — parsing a music preference, calling two tools, writ
 
 ### Trade-offs accepted
 
-| Decision | Benefit | Cost |
-|----------|---------|------|
-| 20-song CSV catalog | Simple, reproducible, no scraping | Genre gaps make edge-case profiles unreliable |
-| Binary genre matching | Transparent, zero false positives | Rock ≠ Metal even though they are adjacent |
-| Fixed weight ordering | Deterministic, auditable | Users cannot reorder priorities without editing code |
-| In-memory index | Zero latency on retrieval | Does not scale beyond a few thousand songs |
+| Decision              | Benefit                           | Cost                                                 |
+| --------------------- | --------------------------------- | ---------------------------------------------------- |
+| 20-song CSV catalog   | Simple, reproducible, no scraping | Genre gaps make edge-case profiles unreliable        |
+| Binary genre matching | Transparent, zero false positives | Rock ≠ Metal even though they are adjacent           |
+| Fixed weight ordering | Deterministic, auditable          | Users cannot reorder priorities without editing code |
+| In-memory index       | Zero latency on retrieval         | Does not scale beyond a few thousand songs           |
 
 ---
 
@@ -294,14 +295,14 @@ Each song receives a score out of **10.0** — the sum of six weighted terms:
 score = genre_pts + mood_pts + energy_pts + acousticness_pts + valence_pts + tempo_pts
 ```
 
-| Feature | Type | Max pts | Rationale |
-|---------|------|---------|-----------|
-| Genre | categorical match | 3.0 | ~8% random match rate; defines the entire sonic world |
-| Mood | categorical match | 2.0 | Strong signal, but less precise than genre |
-| Energy | continuous similarity | 2.0 | Widest numeric range (0.22–0.97); best single feel proxy |
-| Acousticness | continuous similarity | 1.5 | Cleanly separates organic vs produced |
-| Valence | continuous similarity | 1.0 | Users tolerate wider variation here |
-| Tempo | continuous similarity | 0.5 | Partially redundant with energy; needs BPM normalization |
+| Feature      | Type                  | Max pts | Rationale                                                |
+| ------------ | --------------------- | ------- | -------------------------------------------------------- |
+| Genre        | categorical match     | 3.0     | ~8% random match rate; defines the entire sonic world    |
+| Mood         | categorical match     | 2.0     | Strong signal, but less precise than genre               |
+| Energy       | continuous similarity | 2.0     | Widest numeric range (0.22–0.97); best single feel proxy |
+| Acousticness | continuous similarity | 1.5     | Cleanly separates organic vs produced                    |
+| Valence      | continuous similarity | 1.0     | Users tolerate wider variation here                      |
+| Tempo        | continuous similarity | 0.5     | Partially redundant with energy; needs BPM normalization |
 
 Continuous features use a proximity formula: `weight × (1 − |song_value − user_target|)`.
 
@@ -318,11 +319,11 @@ pytest tests/            # runs all 27 tests in ~0.1 seconds
 python tests/evaluate.py # prints the human-readable evaluation report
 ```
 
-| Test file | Tests | What it covers |
-|---|---|---|
-| `test_ai_recommender.py` | 20 | Tool execution (get_catalog_info, search_songs, score_and_rank), index construction, full agentic loop (mocked Gemini), API error handling |
-| `test_evaluate.py` | 5 | Genre precision, High-confidence score floor (≥7.0), determinism, missing-genre graceful degradation, confidence label thresholds |
-| `test_recommender.py` | 2 | Recommender sort order, explanation non-empty |
+| Test file                | Tests | What it covers                                                                                                                             |
+| ------------------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `test_ai_recommender.py` | 20    | Tool execution (get_catalog_info, search_songs, score_and_rank), index construction, full agentic loop (mocked Gemini), API error handling |
+| `test_evaluate.py`       | 5     | Genre precision, High-confidence score floor (≥7.0), determinism, missing-genre graceful degradation, confidence label thresholds          |
+| `test_recommender.py`    | 2     | Recommender sort order, explanation non-empty                                                                                              |
 
 ### Automated evaluation results
 
@@ -350,11 +351,11 @@ Determinism          : 6/6 identical results on 3 consecutive runs (100%)
 
 Every song card in the UI displays a confidence label derived from its score:
 
-| Score | Label | Meaning |
-|---|---|---|
-| ≥ 7.0 | **High** (green) | Genre matched (+3 pts guaranteed); features align |
-| 4.0 – 6.9 | **Medium** (amber) | Genre absent from catalog; best numeric fit |
-| < 4.0 | **Low** (red) | Catalog gap; system is extrapolating from weak signals |
+| Score     | Label              | Meaning                                                |
+| --------- | ------------------ | ------------------------------------------------------ |
+| ≥ 7.0     | **High** (green)   | Genre matched (+3 pts guaranteed); features align      |
+| 4.0 – 6.9 | **Medium** (amber) | Genre absent from catalog; best numeric fit            |
+| < 4.0     | **Low** (red)      | Catalog gap; system is extrapolating from weak signals |
 
 A score below 7.0 is only possible when the genre bonus (3.0 pts) is missed, which always indicates a catalog gap. This makes the confidence tier a reliable, automatically-derived guardrail that tells users when the system is guessing.
 
@@ -386,7 +387,7 @@ A score below 7.0 is only possible when the genre bonus (3.0 pts) is missed, whi
 
 **Genre binary matching** treats adjacent genres as completely unrelated. A rock listener gets zero genre points for a metal song, even though the two genres share instrumentation, production style, and audience overlap. The scoring formula cannot express "this is close but not exactly right" for categorical features — it is either a match (3.0 pts) or a total miss (0.0 pts). This penalizes users who have nuanced genre preferences.
 
-**The popularity trap** is a subtler bias. Songs with broad numerical appeal — high energy, low acousticness, positive valence — float to the top of many profiles even when they do not match the requested genre or mood. In the experiments, *Gym Hero* appeared in the top 3 for both pop and rock profiles despite being pop-tagged, because its numerical features matched the rock profile's energy target closely. In a real-world system this means a small number of songs get over-recommended, crowding out catalog diversity.
+**The popularity trap** is a subtler bias. Songs with broad numerical appeal — high energy, low acousticness, positive valence — float to the top of many profiles even when they do not match the requested genre or mood. In the experiments, _Gym Hero_ appeared in the top 3 for both pop and rock profiles despite being pop-tagged, because its numerical features matched the rock profile's energy target closely. In a real-world system this means a small number of songs get over-recommended, crowding out catalog diversity.
 
 **Weight ordering is fixed and opinionated.** The system always treats genre as more important than mood, mood as more important than energy, and so on. A user who genuinely cares more about mood than genre has no way to express that preference without editing Python source code. The weights encode the designer's assumptions about what listeners value, not the actual listener's preferences.
 
@@ -400,7 +401,7 @@ A music recommender seems harmless, but three misuse vectors are worth naming ho
 
 **Payola-style catalog bias.** In a commercial deployment, the scoring weights could be quietly adjusted to favor songs from labels or artists who pay for placement. Because the weights are tuned by the developer and invisible to the user, the manipulation would be undetectable from the outside. The defense is transparency: publishing the weights and making the scoring formula auditable (as this project does) makes gaming visible.
 
-**API key exposure and data privacy.** The AI Chat mode sends user queries to Google's Gemini API. If a user types something like *"recommend music for my breakup"* or *"something for my anxiety"*, that personal context is transmitted to an external service and subject to Google's data retention policies. A responsible deployment would include a privacy notice before the first query, offer an opt-out, and avoid logging query content beyond what is necessary.
+**API key exposure and data privacy.** The AI Chat mode sends user queries to Google's Gemini API. If a user types something like _"recommend music for my breakup"_ or _"something for my anxiety"_, that personal context is transmitted to an external service and subject to Google's data retention policies. A responsible deployment would include a privacy notice before the first query, offer an opt-out, and avoid logging query content beyond what is necessary.
 
 **Prevention in this project:** The `.env` file is git-ignored to prevent accidental key commits, the weights are fully documented in the README so anyone can audit them, and the scoring formula is plain readable Python with no hidden adjustments.
 
@@ -410,7 +411,7 @@ A music recommender seems harmless, but three misuse vectors are worth naming ho
 
 Two things genuinely surprised me.
 
-**The missing-genre fallback was more coherent than expected.** I designed the k-pop edge case to expose a hard failure — zero genre points, total collapse. What actually happened was a score of 6.67 with *Sunrise City* (pop, happy, high energy) at #1. The numeric features found a reasonable stylistic neighbor even with no genre match. This was encouraging for robustness but also a little alarming: the system returned a confident-sounding result without any signal to the user that it was guessing. That is what motivated adding the confidence label — the raw score alone was not enough to distinguish "great match" from "best we could do."
+**The missing-genre fallback was more coherent than expected.** I designed the k-pop edge case to expose a hard failure — zero genre points, total collapse. What actually happened was a score of 6.67 with _Sunrise City_ (pop, happy, high energy) at #1. The numeric features found a reasonable stylistic neighbor even with no genre match. This was encouraging for robustness but also a little alarming: the system returned a confident-sounding result without any signal to the user that it was guessing. That is what motivated adding the confidence label — the raw score alone was not enough to distinguish "great match" from "best we could do."
 
 **The model name failed silently in a way that looked like a bug.** When the default model was set to `gemini-1.5-flash`, the app returned the string `"Sorry — there was a problem contacting the AI service"` with no indication of why. The actual cause — a 404 from the API because that model name did not exist on the free-tier endpoint — was buried in a log line at DEBUG level. I spent time checking the API key, the network, and the tool dispatcher before finding it. The lesson: when an AI API fails, the error message is almost never self-explanatory, and catching the raw exception and logging its full text is far more important than I initially thought.
 
@@ -446,6 +447,29 @@ Building this project from a scoring formula all the way to a live AI chat inter
 - **No personalization over time:** The system has no memory between sessions. It cannot learn that a user always skips metal or consistently replays jazz.
 - **Binary genre matching:** Rock and metal share no points despite being adjacent genres. A genre-similarity matrix would address this.
 - **gRPC shutdown warning:** Cosmetic only — does not affect results. Upstream `google-generativeai` issue.
+
+---
+
+## Portfolio
+
+### Video Walkthrough
+
+> 🎬 **Loom walkthrough:** [(https://www.loom.com/share/bf0b02975e4e4b3ba93929199c747481)]
+>
+> The walkthrough demonstrates:
+>
+> - ✅ End-to-end system run (3 different inputs)
+> - ✅ AI feature behavior — RAG injection + agentic tool loop in action
+> - ✅ Reliability behavior — confidence labels and evaluation metrics
+> - ✅ Clear outputs for each case
+
+---
+
+### What This Project Says About Me as an AI Engineer
+
+I built this project in layers — starting from a transparent, hand-crafted scoring formula and ending with a natural-language AI interface — which reflects how I think about engineering: understand the fundamentals before adding abstraction. The scoring engine was fully working and auditable before a single API call was written, and that discipline paid off directly: when Gemini calls `score_and_rank`, it gets back objective numbers it can trust and explain, instead of a black box. I gravitate toward explainability as infrastructure rather than decoration.
+
+The harder lesson was about the gap between "the AI said it would work" and "it actually works." The model confidently recommended a Gemini model name that did not exist on the free-tier endpoint, and the failure was silent — no crash, just a polite error string. Debugging it meant reading raw API responses, not trusting the AI assistant. That experience shaped how I now treat all AI-generated suggestions about external services: verify at runtime, log everything, degrade gracefully. Building reliable AI systems is less about picking the right model and more about what you do around it — retrieval, guardrails, error handling, and tests that run without the API at all.
 
 ---
 
